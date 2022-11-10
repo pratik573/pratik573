@@ -1,0 +1,112 @@
+  import os
+import email
+import argparse
+import html2text
+from cs.rfc2047 import unrfc2047
+
+
+parser = argparse.ArgumentParser(description='extract attachments from eml files')
+parser.add_argument(
+    '-d', '--debug',
+    action='store_true',
+    help='print debug messages to stderr'
+)
+parser.add_argument(
+    '-s', '--single',
+    action='store_true',
+    help='run as single thread (default = multithreaded, one thread per core)'
+)
+parser.add_argument(
+    '-q', '--quiet',
+    action='store_true',
+    help='no output'
+)
+args = parser.parse_args()
+debug = args.debug
+single = args.single
+quiet = args.quiet
+debug and print("debug output is active")
+
+
+od = "attachments"
+
+
+os.path.exists(od) or os.makedirs(od, exist_ok=True)
+
+
+def extract(filename):
+
+
+    debug and print("=> reading %s" % filename)
+    output_count = 0
+    try:
+        with open(filename, "r") as f:
+            try:
+                msg = email.message_from_file(f)
+                if msg.is_multipart():
+                    for part in msg.walk():
+
+                        if part.get_content_type() == 'text/html':
+                            message = str(part.get_payload(decode=True))
+                            plain_message = html2text.html2text(message)
+                            with open('text.txt', 'w') as f:
+                                f.write(plain_message)
+                            print("Writting ", f.name)    
+
+                nratt = len(msg.get_payload())
+
+                if (nratt > 1 and nratt < 20):
+                    for attachment in msg.get_payload()[1:]:
+                        of = attachment.get_filename()
+                        debug and print("attachment name: %s" % of)
+
+                        of = of.replace("\n", "")
+                        of = of.replace("\t", "_")
+                        of = of.replace("\*", "#")
+
+                        try:
+                            output_filename = filename+"_" + unrfc2047(of)
+                            if (of != output_filename):
+                                debug and print("decoded attachment name: %s" % output_filename)
+                        except Exception as inst:
+                            print(type(inst))
+                            print(inst.args)
+                            print(inst)
+
+
+                        if output_filename:
+
+                            fn = od + "/" + output_filename
+                            debug and print("checking existence of %s" % fn)
+                            expand = 0
+                            if os.path.isfile(fn):
+                                while True:
+                                    expand += 1
+
+                                    fn_name, fn_ext = os.path.splitext(output_filename)
+                                    print(fn_name)
+                                    new_filename = fn_name + "_" + str(expand) + fn_ext
+                                    fn = od + "/" + new_filename
+                                    if os.path.isfile(fn):
+                                        continue
+                                    else:
+                                        output_filename = new_filename
+                                        break
+                            not (quiet) and print("Writing %s " % output_filename)
+                            with open(os.path.join(od, output_filename), "wb") as of:
+                                of.write(attachment.get_payload(decode=True))
+                                output_count += 1
+                if output_count == 0:
+                    not (quiet) and print("No attachment found for file %s!" % f.name)
+            except Exception:
+                print('Fail: %s\n' % f)
+
+
+    except IOError:
+        not (quiet) and print("Problem with %s or one of its attachments!" % f.name)
+    return 1, output_count
+
+
+if __name__ == "__main__":
+    file = input('enter the name of the email file')
+    extract(file)
